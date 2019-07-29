@@ -207,7 +207,7 @@ static const char* format_current_endpoint_info(zhandle_t* zh);
 
 /* deserialize forward declarations */
 static void deserialize_response(int type, int xid, int failed, int rc, completion_list_t *cptr, struct iarchive *ia);
-static int deserialize_multi(int xid, completion_list_t *cptr, struct iarchive *ia);
+static int deserialize_multi(int xid, completion_list_t *cptr, struct iarchive *ia, int rc_hint);
 
 /* completion routine forward declarations */
 static int add_completion(zhandle_t *zh, int xid, int completion_type,
@@ -2013,7 +2013,7 @@ static void process_sync_completion(
     case COMPLETION_VOID:
         break;
     case COMPLETION_MULTI:
-        sc->rc = deserialize_multi(cptr->xid, cptr, ia);
+        sc->rc = deserialize_multi(cptr->xid, cptr, ia, sc->rc);
         break;
     default:
         LOG_DEBUG(("Unsupported completion type=%d", cptr->c.type));
@@ -2021,16 +2021,20 @@ static void process_sync_completion(
     }
 }
 
-static int deserialize_multi(int xid, completion_list_t *cptr, struct iarchive *ia)
+static int deserialize_multi(int xid, completion_list_t *cptr, struct iarchive *ia, int rc_hint)
 {
-    int rc = 0;
+    int rc = rc_hint;
     completion_head_t *clist = &cptr->c.clist;
     struct MultiHeader mhdr = { STRUCT_INITIALIZER(type , 0), STRUCT_INITIALIZER(done , 0), STRUCT_INITIALIZER(err , 0) };
     assert(clist);
     deserialize_MultiHeader(ia, "multiheader", &mhdr);
     while (!mhdr.done) {
         completion_list_t *entry = dequeue_completion(clist);
-        assert(entry);
+        if (rc_hint == ZOK) {
+            assert(entry);
+        } else if (entry == NULL) {
+            break;
+        }
 
         if (mhdr.type == -1) {
             struct ErrorResponse er;
@@ -2138,7 +2142,7 @@ static void deserialize_response(int type, int xid, int failed, int rc, completi
     case COMPLETION_MULTI:
         LOG_DEBUG(("Calling COMPLETION_MULTI for xid=%#x failed=%d rc=%d",
                     cptr->xid, failed, rc));
-        rc = deserialize_multi(xid, cptr, ia);
+        rc = deserialize_multi(xid, cptr, ia, rc);
         assert(cptr->c.void_result);
         cptr->c.void_result(rc, cptr->data);
         break;
